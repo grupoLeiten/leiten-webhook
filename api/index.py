@@ -18,6 +18,10 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "Leiten IT <onboarding@resend.dev>")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
+print(f"[INIT] RESEND_API_KEY configured: {bool(RESEND_API_KEY)}")
+print(f"[INIT] GITHUB_TOKEN configured: {bool(GITHUB_TOKEN)}")
+print(f"[INIT] EMAIL_FROM: {EMAIL_FROM}")
+
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
     """Verify the GitHub webhook signature (HMAC SHA-256)."""
@@ -34,8 +38,10 @@ def verify_signature(payload_body: bytes, signature_header: str) -> bool:
 def send_email(to_email: str, subject: str, body_html: str) -> bool:
     """Send an email via Resend API (HTTP-based, works on Vercel)."""
     if not RESEND_API_KEY:
-        print("RESEND_API_KEY not configured - skipping email")
+        print("[EMAIL] ERROR: RESEND_API_KEY not configured - skipping email")
         return False
+
+    print(f"[EMAIL] Sending to {to_email} from {EMAIL_FROM}")
 
     payload = json.dumps({
         "from": EMAIL_FROM,
@@ -55,11 +61,16 @@ def send_email(to_email: str, subject: str, body_html: str) -> bool:
             method="POST",
         )
         with urllib.request.urlopen(req) as resp:
+            status = resp.status
             result = json.loads(resp.read())
-            print(f"Email sent to {to_email} - id: {result.get('id')}")
+            print(f"[EMAIL] SUCCESS - Status: {status} - ID: {result.get('id')}")
             return True
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else "no body"
+        print(f"[EMAIL] HTTP ERROR {e.code}: {error_body}")
+        return False
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        print(f"[EMAIL] EXCEPTION: {type(e).__name__}: {e}")
         return False
 
 
@@ -158,6 +169,8 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle GitHub webhook POST requests."""
+        print("[WEBHOOK] POST received")
+
         # 1. Read body
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
@@ -165,11 +178,14 @@ class handler(BaseHTTPRequestHandler):
         # 2. Verify signature
         signature = self.headers.get("X-Hub-Signature-256", "")
         if not verify_signature(body, signature):
+            print("[WEBHOOK] Invalid signature")
             self._send_json(403, {"error": "Invalid signature"})
             return
 
         # 3. Check event type
         event = self.headers.get("X-GitHub-Event", "")
+        print(f"[WEBHOOK] Event: {event}")
+
         if event == "ping":
             self._send_json(200, {"message": "pong"})
             return
@@ -185,6 +201,8 @@ class handler(BaseHTTPRequestHandler):
         repo = payload.get("repository", {})
         sender = payload.get("sender", {})
 
+        print(f"[WEBHOOK] PR action: {action} by {sender.get('login')}")
+
         # Only notify on meaningful actions
         notify_actions = {"opened", "reopened", "ready_for_review"}
         if action not in notify_actions:
@@ -197,6 +215,7 @@ class handler(BaseHTTPRequestHandler):
             or pr.get("user", {}).get("email")
             or payload.get("sender", {}).get("email")
         )
+        print(f"[WEBHOOK] Email from payload: {author_email}")
 
         # If no email in payload, fetch from PR commits via GitHub API
         if not author_email and GITHUB_TOKEN:
@@ -216,9 +235,9 @@ class handler(BaseHTTPRequestHandler):
                         # Skip noreply GitHub emails
                         if author_email and "noreply" in author_email:
                             author_email = ""
-                print(f"Email from commits API: {author_email}")
+                print(f"[WEBHOOK] Email from commits API: {author_email}")
             except Exception as e:
-                print(f"Failed to fetch email from GitHub API: {e}")
+                print(f"[WEBHOOK] Failed to fetch email from commits API: {e}")
 
         # Last resort: fetch user profile email
         if not author_email and GITHUB_TOKEN:
@@ -233,12 +252,12 @@ class handler(BaseHTTPRequestHandler):
                 with urllib.request.urlopen(req) as resp:
                     user_data = json.loads(resp.read())
                     author_email = user_data.get("email", "")
-                print(f"Email from user profile: {author_email}")
+                print(f"[WEBHOOK] Email from user profile: {author_email}")
             except Exception as e:
-                print(f"Failed to fetch user profile: {e}")
+                print(f"[WEBHOOK] Failed to fetch user profile: {e}")
 
         if not author_email:
-            print(f"No email found for {sender.get('login')} - no GITHUB_TOKEN or email unavailable")
+            print(f"[WEBHOOK] No email found for {sender.get('login')}")
             self._send_json(200, {
                 "message": "No author email available",
                 "hint": "Set GITHUB_TOKEN env var or make GitHub email public.",
@@ -246,11 +265,14 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # 6. Build and send email
+        print(f"[WEBHOOK] Building email for {author_email}")
         subject, email_body = build_pr_email(action, pr, repo, sender)
         sent = send_email(author_email, subject, email_body)
 
         self._send_json(200, {
-            "message": "Notification sent" if sent else "Email skipped (check config)",
+            "message": "Notification sent" if sent else "Email failed (check logs)",
             "pr": pr.get("number"),
             "author": sender.get("login"),
+            "email": author_email,
+            "sent": sent,
         })
