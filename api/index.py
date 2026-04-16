@@ -20,6 +20,13 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 USER_AGENT = "leiten-webhook/1.0"
 DIAG_EMAIL = "jose.poletto@sinis.com.ar"
 
+# -- Mapeo de respaldo: usuario de GitHub → email --
+# Cuando GitHub no expone el email (perfil privado, token sin permisos),
+# usamos este diccionario como última instancia.
+FALLBACK_EMAILS = {
+    "jose-poletto-sinis": "jose.poletto@sinis.com.ar",
+}
+
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
     """Verify the GitHub webhook signature (HMAC SHA-256)."""
@@ -72,18 +79,6 @@ def send_email(to_email: str, subject: str, body_html: str) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)}", "to": to_email, "from": from_address}
 
 
-def send_diagnostic(debug: dict):
-    """Send a diagnostic email with debug info so we can trace issues."""
-    subject = f"[DIAG] Webhook PR #{debug.get('pr_number', '?')} - {debug.get('repo', '?')}"
-    body = f"""
-    <div style="font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4;">
-        <h2 style="color: #4fc3f7;">Webhook Diagnostic</h2>
-        <pre style="white-space: pre-wrap; word-wrap: break-word;">{json.dumps(debug, indent=2, default=str)}</pre>
-    </div>
-    """
-    return send_email(DIAG_EMAIL, subject, body)
-
-
 def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
     """Try to get author email from multiple sources. Returns dict with email and source."""
     results = {"attempts": []}
@@ -96,9 +91,6 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
     )
     results["attempts"].append({
         "method": "webhook_payload",
-        "head_user_email": pr.get("head", {}).get("user", {}).get("email"),
-        "pr_user_email": pr.get("user", {}).get("email"),
-        "sender_email": sender.get("email"),
         "result": author_email or "none"
     })
 
@@ -124,17 +116,13 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
         })
         with urllib.request.urlopen(req) as resp:
             commits = json.loads(resp.read())
-            commit_count = len(commits) if commits else 0
             last_email = ""
             if commits:
                 last_email = commits[-1].get("commit", {}).get("author", {}).get("email", "")
 
             results["attempts"].append({
                 "method": "commits_api",
-                "url": api_url,
-                "commit_count": commit_count,
-                "last_commit_email": last_email,
-                "noreply_check": "noreply" in last_email if last_email else "n/a"
+                "last_commit_email": last_email or "none",
             })
 
             if last_email and "noreply" not in last_email:
@@ -161,7 +149,6 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
             email = user_data.get("email", "")
             results["attempts"].append({
                 "method": "user_profile_api",
-                "url": api_url,
                 "email_found": email or "none"
             })
             if email:
@@ -173,6 +160,19 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
             "method": "user_profile_api",
             "error": f"{type(e).__name__}: {str(e)}"
         })
+
+    # Attempt 4: fallback mapping
+    username = sender.get("login", "")
+    fallback = FALLBACK_EMAILS.get(username)
+    results["attempts"].append({
+        "method": "fallback_mapping",
+        "username": username,
+        "email_found": fallback or "none"
+    })
+    if fallback:
+        results["email"] = fallback
+        results["source"] = "fallback_mapping"
+        return results
 
     results["email"] = None
     results["source"] = "all_methods_failed"
@@ -322,11 +322,9 @@ class handler(BaseHTTPRequestHandler):
 
         author_email = email_result.get("email")
         if not author_email:
-            # Send diagnostic email so we know what happened
             debug["outcome"] = "no_email_found"
-            send_diagnostic(debug)
             self._send_json(200, {
-                "message": "No author email available - diagnostic sent",
+                "message": "No author email available",
                 "debug": debug,
             })
             return
@@ -335,10 +333,7 @@ class handler(BaseHTTPRequestHandler):
         subject, email_body = build_pr_email(action, pr, repo, sender)
         email_send_result = send_email(author_email, subject, email_body)
         debug["email_send"] = email_send_result
-
-        # Always send diagnostic so we can trace
         debug["outcome"] = "email_sent" if email_send_result.get("ok") else "email_failed"
-        send_diagnostic(debug)
 
         self._send_json(200, {
             "message": "Email sent!" if email_send_result.get("ok") else "Email FAILED",
