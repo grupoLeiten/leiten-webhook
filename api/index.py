@@ -16,8 +16,8 @@ import json
 # -- Config from environment variables --
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "Leiten IT <onboarding@resend.dev>")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+USER_AGENT = "leiten-webhook/1.0"
 
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
@@ -37,7 +37,6 @@ def send_email(to_email: str, subject: str, body_html: str) -> dict:
     if not RESEND_API_KEY:
         return {"ok": False, "error": "RESEND_API_KEY not configured"}
 
-    # Force onboarding@resend.dev for free tier compatibility
     from_address = "Leiten IT <onboarding@resend.dev>"
 
     payload = json.dumps({
@@ -54,6 +53,7 @@ def send_email(to_email: str, subject: str, body_html: str) -> dict:
             headers={
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
@@ -73,7 +73,6 @@ def send_email(to_email: str, subject: str, body_html: str) -> dict:
 
 def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
     """Try to get author email from multiple sources. Returns dict with email and source."""
-    # Try payload first
     author_email = (
         pr.get("head", {}).get("user", {}).get("email")
         or pr.get("user", {}).get("email")
@@ -93,7 +92,7 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
         req = urllib.request.Request(api_url, headers={
             "Authorization": f"token {GITHUB_TOKEN}",
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "leiten-webhook",
+            "User-Agent": USER_AGENT,
         })
         with urllib.request.urlopen(req) as resp:
             commits = json.loads(resp.read())
@@ -101,7 +100,7 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
                 email = commits[-1].get("commit", {}).get("author", {}).get("email", "")
                 if email and "noreply" not in email:
                     return {"email": email, "source": "commits_api"}
-    except Exception as e:
+    except Exception:
         pass
 
     # Try user profile API
@@ -111,14 +110,14 @@ def get_author_email(pr: dict, repo: dict, sender: dict) -> dict:
         req = urllib.request.Request(api_url, headers={
             "Authorization": f"token {GITHUB_TOKEN}",
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "leiten-webhook",
+            "User-Agent": USER_AGENT,
         })
         with urllib.request.urlopen(req) as resp:
             user_data = json.loads(resp.read())
             email = user_data.get("email", "")
             if email:
                 return {"email": email, "source": "user_profile_api"}
-    except Exception as e:
+    except Exception:
         pass
 
     return {"email": None, "source": "all_methods_failed"}
@@ -213,7 +212,6 @@ class handler(BaseHTTPRequestHandler):
             "config": {
                 "resend_api_key": "configured" if RESEND_API_KEY else "MISSING",
                 "github_token": "configured" if GITHUB_TOKEN else "MISSING",
-                "email_from": EMAIL_FROM,
                 "webhook_secret": "configured" if WEBHOOK_SECRET else "MISSING",
             }
         })
