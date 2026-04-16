@@ -1,6 +1,7 @@
 """
 Test endpoint — sends a test email via Resend and shows the full result.
 Visit /api/test-email in the browser to trigger.
+DELETE THIS FILE after confirming emails work.
 """
 
 import os
