@@ -7,21 +7,15 @@ Sends an email notification to the PR author before merge.
 import os
 import hmac
 import hashlib
-import smtplib
 import urllib.request
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from http.server import BaseHTTPRequestHandler
 import json
 
 
 # -- Config from environment variables --
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.office365.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "Leiten IT <onboarding@resend.dev>")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
@@ -38,24 +32,32 @@ def verify_signature(payload_body: bytes, signature_header: str) -> bool:
 
 
 def send_email(to_email: str, subject: str, body_html: str) -> bool:
-    """Send an email via SMTP."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        print(f"SMTP credentials not configured - skipping email to {to_email}")
+    """Send an email via Resend API (HTTP-based, works on Vercel)."""
+    if not RESEND_API_KEY:
+        print("RESEND_API_KEY not configured - skipping email")
         return False
 
-    msg = MIMEMultipart("alternative")
-    msg["From"] = EMAIL_FROM
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body_html, "html"))
+    payload = json.dumps({
+        "from": EMAIL_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "html": body_html,
+    }).encode()
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(EMAIL_FROM, to_email, msg.as_string())
-        print(f"Email sent to {to_email}")
-        return True
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            result = json.loads(resp.read())
+            print(f"Email sent to {to_email} - id: {result.get('id')}")
+            return True
     except Exception as e:
         print(f"Failed to send email: {e}")
         return False
