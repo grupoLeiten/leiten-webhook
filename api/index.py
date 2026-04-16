@@ -77,40 +77,61 @@ def build_pr_email(action: str, pr: dict, repo: dict, sender: dict) -> tuple:
     }
     action_text = action_map.get(action, action)
 
-    subject = f"[{repo_name}] PR #{pr_number} {action_text}: {pr_title}"
+    subject = "Tus cambios se enviaron correctamente"
 
     body = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #1a1a2e; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">Notificacion de Pull Request</h2>
-            <p style="margin: 5px 0 0; opacity: 0.8;">{repo_name}</p>
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #ffffff;">
+
+        <div style="background: #0f172a; padding: 32px 28px; border-radius: 12px 12px 0 0; text-align: center;">
+            <div style="font-size: 40px; margin-bottom: 8px;">&#9989;</div>
+            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">
+                Tus cambios se enviaron correctamente
+            </h1>
         </div>
-        <div style="border: 1px solid #e0e0e0; border-top: none; padding: 20px; border-radius: 0 0 8px 8px;">
-            <p>Hola <strong>{author}</strong>,</p>
-            <p>Tu Pull Request <strong>#{pr_number}</strong> {action_text}.</p>
-            <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Titulo</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>{pr_title}</strong></td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Rama</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee;"><code>{head_branch}</code> &rarr; <code>{base_branch}</code></td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Estado</td>
-                    <td style="padding: 8px; border-bottom: 1px solid #eee;">{action_text.capitalize()}</td>
-                </tr>
-            </table>
-            <p>
-                <a href="{pr_url}"
-                   style="display: inline-block; background: #0366d6; color: white;
-                          padding: 10px 20px; border-radius: 5px; text-decoration: none;">
-                    Ver Pull Request en GitHub
-                </a>
+
+        <div style="border: 1px solid #e2e8f0; border-top: none; padding: 28px; border-radius: 0 0 12px 12px;">
+
+            <p style="color: #334155; font-size: 15px; line-height: 1.6; margin-top: 0;">
+                Hola <strong>{author}</strong>, tus cambios fueron enviados y estan
+                <strong>pendientes de revision</strong> antes de pasar a produccion.
             </p>
-            <p style="color: #999; font-size: 12px; margin-top: 20px;">
-                Recorda que este PR aun no fue mergeado. Revisa los cambios antes de aprobar.
+
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-size: 13px; width: 100px;">Proyecto</td>
+                        <td style="padding: 6px 0; color: #1e293b; font-size: 13px; font-weight: 600;">{repo_name}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-size: 13px;">PR</td>
+                        <td style="padding: 6px 0; color: #1e293b; font-size: 13px; font-weight: 600;">#{pr_number} &mdash; {pr_title}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-size: 13px;">Rama</td>
+                        <td style="padding: 6px 0; color: #1e293b; font-size: 13px;"><code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 12px;">{head_branch}</code> &rarr; <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 12px;">{base_branch}</code></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-size: 13px;">Estado</td>
+                        <td style="padding: 6px 0; font-size: 13px;">
+                            <span style="background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">Pendiente de revision</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{pr_url}"
+                   style="display: inline-block; background: #0f172a; color: #ffffff;
+                          padding: 12px 28px; border-radius: 8px; text-decoration: none;
+                          font-size: 14px; font-weight: 600;">
+                    Ver Pull Request
+                </a>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
+
+            <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin: 0; text-align: center;">
+                Cualquier duda, comunicarse con el sector de <strong>Ingenieria IT</strong>.
             </p>
         </div>
     </div>
