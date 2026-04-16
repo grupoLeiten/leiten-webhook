@@ -44,6 +44,7 @@ class handler(BaseHTTPRequestHandler):
                 headers={
                     "Authorization": f"Bearer {RESEND_API_KEY}",
                     "Content-Type": "application/json",
+                    "User-Agent": "leiten-webhook/1.0",
                 },
                 method="POST",
             )
