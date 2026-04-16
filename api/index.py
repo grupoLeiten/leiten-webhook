@@ -8,6 +8,7 @@ import os
 import hmac
 import hashlib
 import smtplib
+import urllib.request
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from http.server import BaseHTTPRequestHandler
@@ -21,6 +22,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER)
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
@@ -187,17 +189,57 @@ class handler(BaseHTTPRequestHandler):
             self._send_json(200, {"message": f"Action '{action}' ignored"})
             return
 
-        # 5. Get author email
+        # 5. Get author email - try multiple sources
         author_email = (
             pr.get("head", {}).get("user", {}).get("email")
             or pr.get("user", {}).get("email")
             or payload.get("sender", {}).get("email")
         )
 
+        # If no email in payload, fetch from PR commits via GitHub API
+        if not author_email and GITHUB_TOKEN:
+            try:
+                repo_full = repo.get("full_name", "")
+                pr_number = pr.get("number", "")
+                api_url = f"https://api.github.com/repos/{repo_full}/pulls/{pr_number}/commits"
+                req = urllib.request.Request(api_url, headers={
+                    "Authorization": f"token {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "leiten-webhook",
+                })
+                with urllib.request.urlopen(req) as resp:
+                    commits = json.loads(resp.read())
+                    if commits:
+                        author_email = commits[-1].get("commit", {}).get("author", {}).get("email", "")
+                        # Skip noreply GitHub emails
+                        if author_email and "noreply" in author_email:
+                            author_email = ""
+                print(f"Email from commits API: {author_email}")
+            except Exception as e:
+                print(f"Failed to fetch email from GitHub API: {e}")
+
+        # Last resort: fetch user profile email
+        if not author_email and GITHUB_TOKEN:
+            try:
+                username = sender.get("login", "")
+                api_url = f"https://api.github.com/users/{username}"
+                req = urllib.request.Request(api_url, headers={
+                    "Authorization": f"token {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "leiten-webhook",
+                })
+                with urllib.request.urlopen(req) as resp:
+                    user_data = json.loads(resp.read())
+                    author_email = user_data.get("email", "")
+                print(f"Email from user profile: {author_email}")
+            except Exception as e:
+                print(f"Failed to fetch user profile: {e}")
+
         if not author_email:
+            print(f"No email found for {sender.get('login')} - no GITHUB_TOKEN or email unavailable")
             self._send_json(200, {
                 "message": "No author email available",
-                "hint": "The user's GitHub email may be private.",
+                "hint": "Set GITHUB_TOKEN env var or make GitHub email public.",
             })
             return
 
